@@ -8,6 +8,7 @@
 
 import UIKit
 import MapKit
+import CoreData
 
 class MapViewController: UIViewController {
     
@@ -17,7 +18,8 @@ class MapViewController: UIViewController {
         return instance
     }()
     
-    fileprivate var locations: [Location]?
+    fileprivate var locations = [Location]()
+    fileprivate var didAppear = false
     
     // MARK: Outlets.
     
@@ -37,6 +39,7 @@ class MapViewController: UIViewController {
 
         // Create and add the location to the core data store.
         let location = Location(coordinate: coordinate, context: dataStack.mainContext)
+        locations.append(location)
 
         // Create and add the annotation to the map.
         let annotation = location.toAnnotation()
@@ -53,13 +56,25 @@ class MapViewController: UIViewController {
     
     // MARK: View controller life cycle.
 
-    override func viewDidLoad() {
-        super.viewDidLoad()
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
         loadLocations()
+        reloadAnnotations()
+        didAppear = true
     }
 
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
+    }
+    
+    override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
+        if let viewController = segue.destination as? LocationViewController, let annotation = sender as? LocationAnnotation {
+            let match = locations.first() { $0.id == annotation.locationID }
+            if let location = match {
+                viewController.context = dataStack.mainContext
+                viewController.location = location
+            }
+        }
     }
     
     // MARK: Map annotations
@@ -69,8 +84,7 @@ class MapViewController: UIViewController {
     //
     fileprivate func loadLocations() {
         do {
-            locations = try dataStack.fetchLocations()
-            reloadAnnotations()
+            locations = try dataStack.mainContext.allLocations()
         }
         catch {
             showAlert(forError: error)
@@ -82,17 +96,8 @@ class MapViewController: UIViewController {
     //
     private func reloadAnnotations() {
         mapView.removeAnnotations(mapView.annotations)
-        if let locations = locations {
-            let annotations = makeAnnotations(forLocations: locations)
-            mapView.addAnnotations(annotations)
-        }
-    }
-    
-    //
-    //
-    //
-    private func makeAnnotations(forLocations locations: [Location]) -> [MKAnnotation] {
-        return locations.map { $0.toAnnotation() }
+        let annotations = locations.map { $0.toAnnotation() }
+        mapView.addAnnotations(annotations)
     }
 }
 
@@ -110,7 +115,7 @@ extension MapViewController: MKMapViewDelegate {
         
         if view == nil {
             let pinView = MKPinAnnotationView(annotation: annotation, reuseIdentifier: reuseIdentifier)
-            pinView.animatesDrop = true
+            pinView.animatesDrop = !didAppear
             view = pinView
         }
         
@@ -121,6 +126,9 @@ extension MapViewController: MKMapViewDelegate {
     //
     //
     func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
-        
+        guard let annotation = view.annotation as? LocationAnnotation else {
+            return
+        }
+        performSegue(withIdentifier: "location", sender: annotation)
     }
 }

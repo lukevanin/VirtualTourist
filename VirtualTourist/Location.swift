@@ -14,6 +14,13 @@ import MapKit
 private let entityName = "Location"
 
 //
+//
+//
+class LocationAnnotation: MKPointAnnotation {
+    var locationID: String?
+}
+
+//
 //  Map kit extensions.
 //
 extension Location {
@@ -39,14 +46,16 @@ extension Location {
             fatalError("Cannot initialize entity \(entityName)")
         }
         self.init(entity: entity, insertInto: context)
+        self.id = UUID().uuidString
         self.coordinate = coordinate
     }
     
     //
     //  Convenience function for creating map kit annotations from a location instance.
     //
-    func toAnnotation() -> MKAnnotation {
-        let annotation = MKPointAnnotation()
+    func toAnnotation() -> LocationAnnotation {
+        let annotation = LocationAnnotation()
+        annotation.locationID = id
         annotation.coordinate = coordinate
         return annotation
     }
@@ -55,13 +64,13 @@ extension Location {
 //
 //  Core data stack extensions for querying locations.
 //
-extension CoreDataStack {
+extension NSManagedObjectContext {
     
     //
     //  Retrieve all locations.
     //
-    func fetchLocations() throws -> [Location] {
+    func allLocations() throws -> [Location] {
         let request: NSFetchRequest<Location> = Location.fetchRequest()
-        return try mainContext.fetch(request)
+        return try fetch(request)
     }
 }
