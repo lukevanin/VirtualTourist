@@ -13,12 +13,14 @@ private let entityName = "Photo"
 
 extension Photo {
     
-    convenience init(url: String, location: Location, context: NSManagedObjectContext) {
+    convenience init(ordering: Int, url: String, largeURL: String, location: Location, context: NSManagedObjectContext) {
         guard let entity = NSEntityDescription.entity(forEntityName: entityName, in: context) else {
             fatalError("Cannot initialize entity \(entityName)")
         }
         self.init(entity: entity, insertInto: context)
+        self.ordering = Int16(ordering)
         self.url = url
+        self.largeURL = largeURL
         self.location = location
     }
 }
@@ -28,9 +30,9 @@ extension NSManagedObjectContext {
     //
     //  Retrieve all photos for a specific location
     //
-    func photos(forLocation location: Location) throws -> [Photo] {
+    func photos(forLocation id: String) throws -> [Photo] {
         let request: NSFetchRequest<Photo> = Photo.fetchRequest()
-        request.predicate = NSPredicate(format: "location == %@", location)
+        request.predicate = NSPredicate(format: "location.id == %@", id)
         return try fetch(request)
     }
     

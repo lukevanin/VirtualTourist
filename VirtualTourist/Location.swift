@@ -17,7 +17,7 @@ private let entityName = "Location"
 //
 //
 class LocationAnnotation: MKPointAnnotation {
-    var locationID: String?
+    var locationId: String?
 }
 
 //
@@ -55,7 +55,7 @@ extension Location {
     //
     func toAnnotation() -> LocationAnnotation {
         let annotation = LocationAnnotation()
-        annotation.locationID = id
+        annotation.locationId = id
         annotation.coordinate = coordinate
         return annotation
     }
@@ -71,6 +71,15 @@ extension NSManagedObjectContext {
     //
     func allLocations() throws -> [Location] {
         let request: NSFetchRequest<Location> = Location.fetchRequest()
+        return try fetch(request)
+    }
+    
+    //
+    //
+    //
+    func locations(withId id: String) throws -> [Location] {
+        let request: NSFetchRequest<Location> = Location.fetchRequest()
+        request.predicate = NSPredicate(format: "id == %@", id)
         return try fetch(request)
     }
 }

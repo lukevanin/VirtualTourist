@@ -18,20 +18,28 @@ class MapViewController: UIViewController {
         return instance
     }()
     
+    fileprivate var context: NSManagedObjectContext {
+        return self.dataStack.mainContext
+    }
+    
     fileprivate var locations = [Location]()
-    fileprivate var didAppear = false
+    fileprivate var isTouching = false
     
     // MARK: Outlets.
     
     @IBOutlet weak var mapView: MKMapView!
+    @IBOutlet weak var messageView: UIView!
     
     // MARK: Actions
     
     @IBAction func onMapLongPressGesture(_ gesture: UIGestureRecognizer) {
         
         guard gesture.state == .began else {
+            isTouching = false
             return
         }
+        
+        isTouching = true
         
         // Convert the gesture location to map coordinates.
         let point = gesture.location(in: view)
@@ -45,6 +53,9 @@ class MapViewController: UIViewController {
         let annotation = location.toAnnotation()
         mapView.addAnnotation(annotation)
         
+        //
+        updateEditMode()
+
         // Save the main context to propogate the changes to the background context.
         do {
             try dataStack.mainContext.save()
@@ -55,12 +66,20 @@ class MapViewController: UIViewController {
     }
     
     // MARK: View controller life cycle.
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.rightBarButtonItem = editButtonItem
+    }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        isTouching = false
+        navigationController?.setToolbarHidden(true, animated: false)
+        setEditing(false, animated: false)
         loadLocations()
+        updateEditMode()
         reloadAnnotations()
-        didAppear = true
     }
 
     override func didReceiveMemoryWarning() {
@@ -69,11 +88,38 @@ class MapViewController: UIViewController {
     
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
         if let viewController = segue.destination as? LocationViewController, let annotation = sender as? LocationAnnotation {
-            let match = locations.first() { $0.id == annotation.locationID }
+            let match = locations.first { $0.id == annotation.locationId }
             if let location = match {
-                viewController.context = dataStack.mainContext
+                viewController.dataStack = dataStack
                 viewController.location = location
             }
+        }
+    }
+    
+    override func setEditing(_ editing: Bool, animated: Bool) {
+        super.setEditing(editing, animated: animated)
+        if messageView.isHidden == isEditing {
+            UIView.transition(
+                with: view,
+                duration: 0.25,
+                options: [.beginFromCurrentState, .transitionCrossDissolve],
+                animations: {
+                    self.messageView.isHidden = !self.isEditing
+            })
+        }
+    }
+    
+    // MARK: Editing 
+    
+    //
+    //
+    //
+    fileprivate func updateEditMode() {
+        let canEdit = (locations.count > 0)
+        editButtonItem.isEnabled = canEdit
+        
+        if !canEdit && isEditing {
+            isEditing = false
         }
     }
     
@@ -84,10 +130,32 @@ class MapViewController: UIViewController {
     //
     fileprivate func loadLocations() {
         do {
-            locations = try dataStack.mainContext.allLocations()
+            locations = try context.allLocations()
         }
         catch {
             showAlert(forError: error)
+        }
+    }
+    
+    //
+    //
+    //
+    fileprivate func deleteLocation(withId id: String, completion: @escaping () -> Void) {
+        dataStack.performBackgroundChanges() { context in
+            do {
+                let locations = try context.locations(withId: id)
+                guard locations.count > 0 else {
+                    return
+                }
+                for location in locations {
+                    context.delete(location)
+                }
+                try context.save()
+            }
+            catch {
+                print("Cannot delete location: \(error)")
+            }
+            completion()
         }
     }
     
@@ -111,15 +179,14 @@ extension MapViewController: MKMapViewDelegate {
     //
     func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
         let reuseIdentifier = "location"
-        var view = mapView.dequeueReusableAnnotationView(withIdentifier: reuseIdentifier)
+        var pinView = mapView.dequeueReusableAnnotationView(withIdentifier: reuseIdentifier)  as? MKPinAnnotationView
         
-        if view == nil {
-            let pinView = MKPinAnnotationView(annotation: annotation, reuseIdentifier: reuseIdentifier)
-            pinView.animatesDrop = !didAppear
-            view = pinView
+        if pinView == nil {
+            pinView = MKPinAnnotationView(annotation: annotation, reuseIdentifier: reuseIdentifier)
         }
-        
-        return view
+
+        pinView?.animatesDrop = isTouching
+        return pinView
     }
     
     //
@@ -129,6 +196,21 @@ extension MapViewController: MKMapViewDelegate {
         guard let annotation = view.annotation as? LocationAnnotation else {
             return
         }
-        performSegue(withIdentifier: "location", sender: annotation)
+        if isEditing {
+            // Editing. Tap on pin to remove.
+            if let id = annotation.locationId {
+                mapView.removeAnnotation(annotation)
+                deleteLocation(withId: id) {
+                    DispatchQueue.main.async {
+                        self.loadLocations()
+                        self.updateEditMode()
+                    }
+                }
+            }
+        }
+        else {
+            // Not editing. Tap pin to show images for location.
+            performSegue(withIdentifier: "location", sender: annotation)
+        }
     }
 }

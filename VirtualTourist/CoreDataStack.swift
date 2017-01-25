@@ -23,6 +23,7 @@ struct CoreDataStack {
     let mainContext: NSManagedObjectContext
     
     fileprivate let backgroundContext: NSManagedObjectContext
+    fileprivate let changeContext: NSManagedObjectContext
     
     init(name: String) throws {
         try self.init(name: name, bundle: Bundle.main)
@@ -70,38 +71,24 @@ struct CoreDataStack {
         // Create context on main queue. Used for reading data from the store.
         mainContext = NSManagedObjectContext(concurrencyType: .mainQueueConcurrencyType)
         mainContext.parent = backgroundContext
+        
+        //
+        changeContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+        changeContext.parent = mainContext
     }
 }
 
-//extension CoreDataStack {
-//    
-//    //
-//    //  Execute a block on the change context. Any changes
-//    //
-//    func performChanges(block: @escaping (NSManagedObjectContext) throws -> Void) throws {
-//        var outputError: Error?
-//        changeContext.perform() {
-//            do {
-//                // Perform the insertion.
-//                try block(self.changeContext)
-//            
-//                // Propogate insertions to the background context so that they are persisted when the background context 
-//                // is saved.
-//                if self.mainContext.hasChanges {
-//                    try self.mainContext.save()
-//                }
-//            }
-//            catch {
-//                // Capture the error to re-propogate to the caller.
-//                outputError = error
-//            }
-//        }
-//        
-//        if let error = outputError {
-//            throw error
-//        }
-//    }
-//}
+extension CoreDataStack {
+    
+    //
+    //  Execute a block on the change context. Any changes
+    //
+    func performBackgroundChanges(block: @escaping (NSManagedObjectContext) -> Void) {
+        changeContext.perform() {
+            block(self.changeContext)
+        }
+    }
+}
 
 extension CoreDataStack {
     
@@ -119,6 +106,15 @@ extension CoreDataStack {
     //  Save the background context and persist any pending changes to fixed storage.
     //
     func saveNow() {
+        if self.mainContext.hasChanges {
+            do {
+                try self.mainContext.save()
+            }
+            catch {
+                print("Cannot save changes from background context")
+            }
+        }
+
         backgroundContext.perform() {
             guard self.backgroundContext.hasChanges else {
                 // No pending changes.

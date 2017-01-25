@@ -15,24 +15,68 @@ import CoreData
 
 class LocationViewController: UIViewController {
     
-    var context: NSManagedObjectContext!
+    enum Change {
+        case update(IndexPath)
+        case insert(IndexPath)
+        case delete(IndexPath)
+    }
+    
+    var dataStack: CoreDataStack!
     var location: Location!
     
-    fileprivate var photos: [Photo]?
+    fileprivate lazy var model: PhotosManager = { [unowned self] in
+        let manager = PhotosManager(
+            location: self.location.id!,
+            dataStack: self.dataStack)
+        return manager
+    }()
     
-    // MARK: Outlets
-    
-    @IBOutlet weak var mapImageView: UIImageView!
-    @IBOutlet weak var collectionView: UICollectionView!
-    @IBOutlet weak var placeholderView: UIView!
-    @IBOutlet weak var reloadButton: UIButton!
-    @IBOutlet weak var photosActivityIndicator: UIActivityIndicatorView!
+    fileprivate lazy var fetchedResultsController: NSFetchedResultsController<Photo> = { [unowned self] in
+        let request: NSFetchRequest<Photo> = Photo.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(key: "ordering", ascending: true)]
+        if let id = self.location.id {
+            request.predicate = NSPredicate(format: "location.id == %@", id)
+        }
+        
+        let controller = NSFetchedResultsController(
+            fetchRequest: request,
+            managedObjectContext: self.dataStack.mainContext,
+            sectionNameKeyPath: nil,
+            cacheName: nil)
+        controller.delegate = self
+        return controller
+    }()
     
     override var isEditing: Bool {
         didSet {
             updateEditMode()
         }
     }
+    
+    fileprivate var photos = [Photo]() {
+        didSet {
+            let hadPhotos = (oldValue.count > 0)
+            let hasPhotos = (photos.count > 0)
+            if hadPhotos != hasPhotos {
+                self.applyCurrentState(animated: true)
+            }
+        }
+    }
+    fileprivate var isFetching: Bool = false
+    fileprivate var changes: [Change]?
+    
+    // MARK: Outlets
+    
+    @IBOutlet weak var mapImageView: UIImageView!
+    @IBOutlet weak var mapView: UIView!
+    @IBOutlet weak var mapActivityIndicator: UIActivityIndicatorView!
+    @IBOutlet weak var pinImageView: UIImageView!
+    @IBOutlet weak var collectionView: UICollectionView!
+    @IBOutlet weak var reloadButtonItem: UIBarButtonItem!
+    @IBOutlet weak var placeholderView: UIView!
+    @IBOutlet weak var photosActivityIndicator: UIActivityIndicatorView!
+    @IBOutlet weak var placeholderLabel: UILabel!
+    @IBOutlet weak var messageView: UIView!
 
     // MARK: Actions
     
@@ -40,56 +84,238 @@ class LocationViewController: UIViewController {
     //  "New collection" button tapped. Reload random images from Flickr.
     //
     @IBAction func onReloadAction(_ sender: Any) {
-        removePhotos()
-        downloadPhotos()
-        updateEditMode()
+        refreshPhotos()
     }
     
     // MARK: View controller life cycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        configureView()
+        navigationItem.rightBarButtonItem = editButtonItem
+        navigationController?.toolbar.barTintColor = UIColor(
+            red: 53.0 / 255.0,
+            green: 83.0 / 255.0,
+            blue: 147.0 / 255.0,
+            alpha: 1.0)
+        configurePlaceholderView()
+        configureMapView()
         configureMap()
-        loadPhotos()
-        
-        if photos?.count == 0 {
-            downloadPhotos()
-        }
-        
-        updateEditMode()
+        applyCurrentState(animated: false)
     }
     
-    private func configureView() {
-        collectionView.addSubview(mapImageView)
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        view.layoutIfNeeded()
+        setEditing(false, animated: false)
+        loadPhotos()
+        refreshPhotosIfNeeded()
+    }
+    
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        model.cancelFetching()
+    }
+    
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        configureCellLayout()
+        configureCollectionViewInset()
+    }
+    
+//    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+//        coordinator.animate(alongsideTransition: { (_) in
+//            self.configureCollectionViewInset()
+//            self.configureCellLayout()
+//        }) { (_) in
+//        }
+//    }
+    
+    override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
+        if let viewController = segue.destination as? ImageViewController, let url = sender as? URL {
+            viewController.imageURL = url
+        }
+    }
+    
+    override func setEditing(_ editing: Bool, animated: Bool) {
+        super.setEditing(editing, animated: animated)
         
-        let headerHeight: CGFloat = 300
+        if navigationController?.isToolbarHidden != editing {
+            navigationController?.setToolbarHidden(editing, animated: animated)
+        }
         
-        mapImageView.translatesAutoresizingMaskIntoConstraints = false
-        
+        if messageView.isHidden == isEditing {
+            UIView.transition(
+                with: view,
+                duration: 0.25,
+                options: [.beginFromCurrentState, .transitionCrossDissolve],
+                animations: {
+                    self.messageView.isHidden = !self.isEditing
+            })
+        }
+    }
+    
+    // MARK: Placeholder
+    
+    //
+    //
+    //
+    private func configurePlaceholderView() {
+        collectionView.addSubview(placeholderView)
+        placeholderView.translatesAutoresizingMaskIntoConstraints = false
         let constraints = [
-            mapImageView.widthAnchor.constraint(equalTo: collectionView.widthAnchor),
-            mapImageView.centerXAnchor.constraint(equalTo: collectionView.centerXAnchor),
-            mapImageView.topAnchor.constraint(lessThanOrEqualTo: topLayoutGuide.bottomAnchor),
-            mapImageView.bottomAnchor.constraint(equalTo: collectionView.topAnchor),
-            mapImageView.heightAnchor.constraint(greaterThanOrEqualToConstant: headerHeight)
-            ]
+            placeholderView.widthAnchor.constraint(equalTo: collectionView.widthAnchor),
+            placeholderView.centerXAnchor.constraint(equalTo: collectionView.centerXAnchor),
+            placeholderView.topAnchor.constraint(equalTo: collectionView.topAnchor),
+            placeholderView.bottomAnchor.constraint(equalTo: bottomLayoutGuide.topAnchor)
+        ]
         NSLayoutConstraint.activate(constraints)
+    }
+    
+    // MARK: State
+    
+    
+    //
+    //
+    //
+    fileprivate func setFetching(fetching: Bool, animated: Bool) {
+        guard isFetching != fetching else {
+            return
+        }
+        isFetching = fetching
+        applyCurrentState(animated: animated)
+    }
+    
+    //
+    //
+    //
+    fileprivate func applyCurrentState(animated: Bool) {
+    
+        let hasPhotos = (photos.count > 0)
+        let showActivity = isFetching && !hasPhotos
+        let showLabel = !isFetching && !hasPhotos
+        let showPlaceholder = showLabel || showActivity
+
+        func configureView() {
+            placeholderView.isHidden = !showPlaceholder
+            placeholderLabel.isHidden = !showLabel
+        }
+
+        if animated {
+            UIView.transition(
+                with: view,
+                duration: 0.25,
+                options: [.beginFromCurrentState, .transitionCrossDissolve],
+                animations: {
+                    configureView()
+            })
+        }
+        else {
+            configureView()
+        }
         
-        collectionView.contentInset.top = headerHeight
+        if showActivity {
+            photosActivityIndicator.startAnimating()
+        }
+        else {
+            photosActivityIndicator.stopAnimating()
+        }
     }
     
     fileprivate func updateEditMode() {
-        let canEdit = ((photos?.count ?? 0) > 0)
-        navigationItem.rightBarButtonItem = canEdit ? editButtonItem : nil
+        let canEdit = (photos.count > 0)
+        editButtonItem.isEnabled = canEdit
+        
+        if !canEdit && isEditing {
+            isEditing = false
+        }
+    }
+
+    // MARK: Map
+
+    //
+    //
+    //
+    private func configureMapView() {
+        collectionView.addSubview(mapView)
+        mapView.translatesAutoresizingMaskIntoConstraints = false
+        let constraints = [
+            mapView.widthAnchor.constraint(equalTo: collectionView.widthAnchor),
+            mapView.centerXAnchor.constraint(equalTo: collectionView.centerXAnchor),
+            mapView.topAnchor.constraint(lessThanOrEqualTo: topLayoutGuide.bottomAnchor),
+            mapView.bottomAnchor.constraint(equalTo: collectionView.topAnchor)
+        ]
+        NSLayoutConstraint.activate(constraints)
     }
     
-    // MARK: Map
+    //
+    //
+    //
+    private func configureCollectionViewInset() {
+        let viewSize = view.bounds.size
+        let maximumHeight = viewSize.height - 140
+        let headerHeight: CGFloat = min(viewSize.width, maximumHeight)
+        collectionView.contentInset.top = headerHeight
+    }
     
+    //
+    //
+    //
+    private func configureCellLayout() {
+        guard let layout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout else {
+            return
+        }
+
+        let idealSize: CGFloat = 105
+        let viewSize = view.bounds.size
+        let margin = layout.sectionInset.left + layout.sectionInset.right
+        let availableSpace = viewSize.width - margin
+        let numberOfItems = round(availableSpace / idealSize)
+        let numberOfSpaces = numberOfItems - 1
+        let actualSize = floor((availableSpace - numberOfSpaces) / numberOfItems)
+        layout.itemSize = CGSize(width: actualSize, height: actualSize)
+    }
+
     //
     //
     //
     private func configureMap() {
+        let pinView = MKPinAnnotationView(annotation: nil, reuseIdentifier: nil)
+        pinImageView.image = pinView.image
+        
+        if let data = location.mapImage, let image = UIImage(data: data as Data, scale: UIScreen.main.scale) {
+            mapImageView.image = image
+        }
+        else {
+            mapActivityIndicator.startAnimating()
+            pinImageView.isHidden = true
+            loadMapImage() { [weak self] image in
+                DispatchQueue.main.async {
+                    guard let `self` = self else {
+                        return
+                    }
+                    self.mapActivityIndicator.stopAnimating()
+                    UIView.transition(
+                        with: self.view,
+                        duration: 0.25,
+                        options: [.beginFromCurrentState, .transitionCrossDissolve],
+                        animations: {
+                            self.mapImageView.image = image
+                            self.pinImageView.isHidden = false
+                    })
+                    
+                    if let image = image {
+                        self.saveMapImage(image: image)
+                    }
+                }
+            }
+        }
+    }
+    
+    //
+    //
+    //
+    private func loadMapImage(completion: @escaping (UIImage?) -> Void) {
+
         let region = MKCoordinateRegion(
             center: location.coordinate,
             span: MKCoordinateSpan(
@@ -97,17 +323,38 @@ class LocationViewController: UIViewController {
                 longitudeDelta: 1.0
             )
         )
+        
+        let viewSize = view.bounds.size
+        let dimension = max(viewSize.width, viewSize.height)
+        let size = CGSize(width: dimension, height: dimension)
+        
         let options = MKMapSnapshotOptions()
         options.region = region
-        options.size = view.bounds.size
+        options.size = size
         options.scale = UIScreen.main.scale
         let snapshotter = MKMapSnapshotter(options: options)
         snapshotter.start { (snapshot, error) in
-            guard let snapshot = snapshot else {
-                print("Cannot create map snapshot: \(error)")
+            completion(snapshot?.image)
+        }
+    }
+    
+    //
+    //
+    //
+    private func saveMapImage(image: UIImage) {
+        let objectId = location.objectID
+        dataStack.performBackgroundChanges { (context) in
+            guard let data = UIImagePNGRepresentation(image) else {
                 return
             }
-            self.mapImageView.image = snapshot.image
+            do {
+                let location = try context.existingObject(with: objectId) as? Location
+                location?.mapImage = data as NSData
+                try context.save()
+            }
+            catch {
+                print("Cannot save map image: \(error)")
+            }
         }
     }
     
@@ -116,51 +363,13 @@ class LocationViewController: UIViewController {
     //
     //
     //
-    private func removePhotos() {
-        deletePhotos()
-        photos = nil
-        collectionView?.reloadData()
-    }
-    
-    //
-    //
-    //
-    private func deletePhotos() {
-        do {
-            let photos = try context.photos(forLocation: location)
-            for photo in photos {
-                context.delete(photo)
-            }
-            try context.save()
-        }
-        catch {
-            print("Cannot delete photos: \(error)")
-        }
-    }
-    
-    //
-    //
-    //
-    fileprivate func deletePhoto(at index: Int) {
-        guard let photo = photos?.remove(at: index) else {
-            return
-        }
-        context.delete(photo)
-        do {
-            try context.save()
-        }
-        catch {
-            print("Cannot delete photo: \(error)")
-        }
-    }
-    
-    //
-    //
-    //
     private func loadPhotos() {
         do {
-            photos = try context.photos(forLocation: location)
-            collectionView?.reloadData()
+            try fetchedResultsController.performFetch()
+            photos = fetchedResultsController.fetchedObjects ?? []
+            collectionView.reloadData()
+            updateEditMode()
+            applyCurrentState(animated: true)
         }
         catch {
             print("Cannot load photos: \(error)")
@@ -170,158 +379,87 @@ class LocationViewController: UIViewController {
     //
     //
     //
-    private func downloadPhotos() {
-        let request = FlickrPhotosRequest(
-            coordinate: location.coordinate,
-            radius: 20,
-            itemsPerPage: 18,
-            page: 1
-        )
-        fetchFlickrPhotos(request: request) { response in
-            DispatchQueue.main.async {
-                guard let photos = response?.photos else {
-                    return
+    private func refreshPhotosIfNeeded() {
+        if photos.count == 0 {
+            refreshPhotos()
+        }
+        else {
+            model.downloadImages(completion: nil)
+        }
+    }
+    
+    //
+    //
+    //
+    private func refreshPhotos() {
+        model.cancelFetching()
+        setFetching(fetching: true, animated: true)
+        model.deletePhotos() { [weak self] _ in
+            guard let location = self?.location else {
+                return
+            }
+            self?.model.fetchPhotos(coordinate: location.coordinate, radius: 20, numberOfItems: 30) {
+                self?.setFetching(fetching: false, animated: true)
+            }
+        }
+    }
+    
+}
+
+//
+//
+//
+extension LocationViewController: NSFetchedResultsControllerDelegate {
+    
+    func controllerWillChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
+        changes = []
+    }
+    
+    func controller(_ controller: NSFetchedResultsController<NSFetchRequestResult>, didChange anObject: Any, at indexPath: IndexPath?, for type: NSFetchedResultsChangeType, newIndexPath: IndexPath?) {
+        
+        switch (type, indexPath, newIndexPath) {
+        case (.delete, .some(let indexPath), _):
+            changes?.append(.delete(indexPath))
+            
+        case (.insert, _, .some(let newIndexPath)):
+            changes?.append(.insert(newIndexPath))
+            
+        case (.move, .some(let indexPath), .some(let newIndexPath)):
+            changes?.append(.delete(indexPath))
+            changes?.append(.insert(newIndexPath))
+            
+        case (.update, .some(let indexPath), _):
+            changes?.append(.update(indexPath))
+            
+        default:
+            print("Unsupported update: \(type) \(indexPath) \(newIndexPath)")
+        }
+    }
+    
+    func controllerDidChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
+        guard let changes = changes, changes.count > 0 else {
+            return
+        }
+        self.changes = nil
+        self.photos = (controller.fetchedObjects as? [Photo]) ?? []
+        collectionView.performBatchUpdates({
+            for change in changes {
+                switch change {
+                case .insert(let indexPath):
+                    self.collectionView.insertItems(at: [indexPath])
+                    
+                case .delete(let indexPath):
+                    self.collectionView.deleteItems(at: [indexPath])
+                    
+                case .update(let indexPath):
+                    self.collectionView.reloadItems(at: [indexPath])
                 }
-                self.insertPhotos(photos)
-                self.loadPhotos()
+            }
+        }, completion: { (finished) in
+            if finished {
                 self.updateEditMode()
-                
-                if let photos = self.photos {
-                    self.downloadPhotos(photos)
-                }
             }
-        }
-    }
-    
-    //
-    //
-    //
-    private func insertPhotos(_ items: [FlickrPhoto]) {
-        for item in items {
-            let url = item.imageURL(forSize: .medium)
-            let _ = Photo(url: url.absoluteString, location: location, context: context)
-        }
-        do {
-            try context.save()
-        }
-        catch {
-            print("Cannot insert photos: \(error)")
-        }
-    }
-    
-    //
-    //
-    //
-    private func downloadPhotos(_ photos: [Photo]) {
-        for photo in photos {
-            if let url = photo.url {
-                downloadPhoto(url: url)
-            }
-        }
-    }
-    
-    //
-    //
-    //
-    private func downloadPhoto(url: String) {
-        guard let requestURL = URL(string: url) else {
-            return
-        }
-        let request = URLRequest(url: requestURL)
-        let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
-            DispatchQueue.main.async {
-                if let data = data {
-                    
-                    // Update core data store.
-                    self.updatePhoto(url: url, data: data)
-                    
-                    // Update collection view.
-                    if let photos = self.photos {
-                        var indexPaths = [IndexPath]()
-                        for i in 0 ..< photos.count {
-                            let photo = photos[i]
-                            if photo.url == url {
-                                let indexPath = IndexPath(item: i, section: 0)
-                                indexPaths.append(indexPath)
-                            }
-                        }
-                        if indexPaths.count > 0 {
-                            self.collectionView.performBatchUpdates({
-                                self.collectionView.reloadItems(at: indexPaths)
-                            }, completion: nil)
-                        }
-                    }
-                }
-            }
-        }
-        task.resume()
-    }
-    
-    //
-    //
-    //
-    private func updatePhoto(url: String, data: Data) {
-        do {
-            let photos = try context.photos(withURL: url)
-            for photo in photos {
-                photo.image = data as NSData
-            }
-            try context.save()
-        }
-        catch {
-            print("Cannot update photo: %@", error)
-        }
-    }
-    
-    //
-    //
-    //
-    private func fetchFlickrPhotos(request: FlickrPhotosRequest, completion: @escaping (FlickrPhotos?) -> Void) {
-        let flickrKey = "55b886af3fbb96a78db2b14ace620b2f"
-//        let flickrSecret = ""
-        let baseURL = URL(string: "https://api.flickr.com/services/rest/")
-        
-        guard var components = URLComponents(url: baseURL!, resolvingAgainstBaseURL: false) else {
-            return
-        }
-        
-        let queryItems = [
-            URLQueryItem(name: "method", value: "flickr.photos.search"),
-            URLQueryItem(name: "api_key", value: flickrKey),
-            URLQueryItem(name: "lat", value: String(format: "%0.8f", request.coordinate.latitude)),
-            URLQueryItem(name: "lon", value: String(format: "%0.8f", request.coordinate.longitude)),
-            URLQueryItem(name: "radius", value: String(format: "%d", request.radius)),
-            URLQueryItem(name: "radius_units", value: "km"),
-            URLQueryItem(name: "per_page", value: String(format: "%d", request.itemsPerPage)),
-            URLQueryItem(name: "format", value: "json"),
-            URLQueryItem(name: "nojsoncallback", value: "1")
-            ]
-        components.queryItems = queryItems
-        
-        guard let url = components.url else {
-            return
-        }
-        
-        let task = URLSession.shared.dataTask(with: url) { (data, response, error) in
-            DispatchQueue.main.async {
-                guard let data = data else {
-                    print("Cannot load photos: \(error)")
-                    completion(nil)
-                    return
-                }
-                
-                do {
-                    let json = try JSONSerialization.jsonObject(with: data, options: [])
-                    let photos = try FlickrPhotos(json: json)
-                    completion(photos)
-                }
-                catch {
-                    print("Cannot parse photos: \(error)")
-                    completion(nil)
-                }
-            }
-        }
-        task.resume()
+        })
     }
 }
 
@@ -331,14 +469,15 @@ class LocationViewController: UIViewController {
 extension LocationViewController: UICollectionViewDataSource, UICollectionViewDelegate {
     
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        return photos?.count ?? 0
+        return photos.count
     }
     
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "ImageCell", for: indexPath)
         if let cell = cell as? ImageCell {
-            if let photo = photos?[indexPath.item], let data = photo.image as? Data {
-                let image = UIImage(data: data)
+            let photo = photos[indexPath.item]
+            if let data = photo.image as? Data {
+                let image = UIImage(data: data, scale: UIScreen.main.scale)
                 cell.imageView.image = image
             }
             else {
@@ -349,13 +488,15 @@ extension LocationViewController: UICollectionViewDataSource, UICollectionViewDe
     }
     
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        let photo = photos[indexPath.item]
         if isEditing {
-            deletePhoto(at: indexPath.item)
-            collectionView.performBatchUpdates({
-                collectionView.deleteItems(at: [indexPath])
-            }, completion: { _ in
-                self.updateEditMode()
-            })
+            model.cancelFetching()
+            model.deletePhoto(id: photo.objectID, completion: nil)
+        }
+        else {
+            if let url = photo.largeURL, let imageURL = URL(string: url) {
+                performSegue(withIdentifier: "image", sender: imageURL)
+            }
         }
     }
 }

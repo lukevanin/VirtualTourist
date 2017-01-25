@@ -13,6 +13,12 @@ class ImageCell: UICollectionViewCell {
     @IBOutlet weak var imageView: UIImageView!
     @IBOutlet weak var activityIndicator: UIActivityIndicatorView!
     
+    override func awakeFromNib() {
+        super.awakeFromNib()
+        imageView.layer.shouldRasterize = true
+        imageView.layer.rasterizationScale = UIScreen.main.scale
+    }
+    
     override func prepareForReuse() {
         super.prepareForReuse()
         imageView.image = nil
