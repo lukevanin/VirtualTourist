@@ -75,9 +75,9 @@ class LocationViewController: UIViewController {
         super.viewDidLoad()
         navigationItem.rightBarButtonItem = editButtonItem
         navigationController?.toolbar.barTintColor = UIColor(
-            red: 128.0 / 255.0,
-            green: 0.0 / 255.0,
-            blue: 255.0 / 255.0,
+            red: 0.0 / 255.0,
+            green: 128.0 / 255.0,
+            blue: 64.0 / 255.0,
             alpha: 1.0)
         configurePlaceholderView()
         configureMapView()

@@ -6,7 +6,7 @@ Mark locations of interest on a map by adding and removing pins. See photos for 
 
 <img src="Screenshots/iPhone/Portrait/1 Map.png" width="320">
 <img src="Screenshots/iPhone/Portrait/2 Photos.png" width="320">
-<img src="Screenshots/iPhone/Portrait/3 Photo.png" width="320">
+<img src="Screenshots/iPhone/Landscape/3 Photo.png" height="320">
 
 ## Features
 
@@ -28,4 +28,8 @@ Image data is also managed by Core Data using the external file attribute for th
 
 ### Photos
 
-Photos are loaded in the background when the pin is added to the map. The image is created using *MKMapSnapshotter* and cached in the Core Data.
+Photos are loaded in the background when the pin is added to the map. When the app launches it resumes downloading any images which were not
+
+### Map
+
+The photos screen displays an image for the map, instead of using an *MKMapView*. This is done for performance reasons, to enable the stretchy header to expand and contract when the collection view is temporarily scrolled beyond its limits. A normal MKMapView does not update fast enough for this interaction, and causes the display to become laggy. The image is generated using *MKMapSnapshotter*. The snapshot is created asynchrously. A side effect of using a snapshot is that the generated image does include annotations, and so the pin image is added explicitly.
