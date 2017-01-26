@@ -14,10 +14,10 @@
 //  mainContext. Queries to mainContext should only be done on the main queue.
 //
 
-import Foundation
+import UIKit
 import CoreData
 
-struct CoreDataStack {
+class CoreDataStack {
     
     let name: String
     let mainContext: NSManagedObjectContext
@@ -25,11 +25,11 @@ struct CoreDataStack {
     fileprivate let backgroundContext: NSManagedObjectContext
     fileprivate let changeContext: NSManagedObjectContext
     
-    init(name: String) throws {
+    convenience init(name: String) throws {
         try self.init(name: name, bundle: Bundle.main)
     }
     
-    init(name: String, bundle: Bundle) throws {
+    required init(name: String, bundle: Bundle) throws {
         self.name = name
 
         let modelURL = bundle.bundleURL.appendingPathComponent(name).appendingPathExtension("momd")
@@ -75,6 +75,15 @@ struct CoreDataStack {
         //
         changeContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
         changeContext.parent = mainContext
+        
+        // Add notification observers to save the context when the app enters the background.
+        NotificationCenter.default.addObserver(self, selector: #selector(onApplicationWillResignActiveNotification), name: .UIApplicationWillResignActive, object: nil)
+    }
+    
+    @objc func onApplicationWillResignActiveNotification(_ notification: Notification) {
+        DispatchQueue.main.async {
+            self.saveNow()
+        }
     }
 }
 
@@ -106,6 +115,7 @@ extension CoreDataStack {
     //  Save the background context and persist any pending changes to fixed storage.
     //
     func saveNow() {
+        assert(Thread.isMainThread)
         if self.mainContext.hasChanges {
             do {
                 try self.mainContext.save()

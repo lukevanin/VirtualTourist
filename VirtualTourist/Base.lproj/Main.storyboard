@@ -16,10 +16,10 @@
             <objects>
                 <navigationController id="F8o-Oy-Ko0" sceneMemberID="viewController">
                     <nil key="simulatedBottomBarMetrics"/>
-                    <navigationBar key="navigationBar" contentMode="scaleToFill" barStyle="black" id="GOx-WW-KLN">
+                    <navigationBar key="navigationBar" contentMode="scaleToFill" misplaced="YES" barStyle="black" id="GOx-WW-KLN">
                         <rect key="frame" x="0.0" y="0.0" width="375" height="44"/>
                         <autoresizingMask key="autoresizingMask"/>
-                        <color key="barTintColor" red="0.20784313730000001" green="0.32549019610000002" blue="0.57647058819999997" alpha="1" colorSpace="calibratedRGB"/>
+                        <color key="barTintColor" red="0.50196081400000003" green="0.0" blue="1" alpha="1" colorSpace="calibratedRGB"/>
                     </navigationBar>
                     <toolbar key="toolbar" opaque="NO" clearsContextBeforeDrawing="NO" contentMode="scaleToFill" id="Gf5-YT-hNr">
                         <rect key="frame" x="0.0" y="623" width="375" height="44"/>
@@ -296,7 +296,7 @@
         <!--Virtual Tourist-->
         <scene sceneID="Fkn-Nt-RCt">
             <objects>
-                <viewController automaticallyAdjustsScrollViewInsets="NO" hidesBottomBarWhenPushed="YES" id="YQq-LD-VOo" customClass="ImageViewController" customModule="VirtualTourist" customModuleProvider="target" sceneMemberID="viewController">
+                <viewController automaticallyAdjustsScrollViewInsets="NO" id="YQq-LD-VOo" customClass="ImageViewController" customModule="VirtualTourist" customModuleProvider="target" sceneMemberID="viewController">
                     <layoutGuides>
                         <viewControllerLayoutGuide type="top" id="K6f-JB-r55"/>
                         <viewControllerLayoutGuide type="bottom" id="Fv5-uW-B7u"/>
@@ -326,7 +326,6 @@
                                         </connections>
                                     </scrollView>
                                 </subviews>
-                                <color key="backgroundColor" red="0.29803922770000002" green="0.29803922770000002" blue="0.29803922770000002" alpha="1" colorSpace="calibratedRGB"/>
                                 <constraints>
                                     <constraint firstItem="lxp-0s-KKP" firstAttribute="width" secondItem="IKh-zT-6ud" secondAttribute="width" id="PLI-Ei-B3r"/>
                                     <constraint firstItem="lxp-0s-KKP" firstAttribute="centerY" secondItem="IKh-zT-6ud" secondAttribute="centerY" id="c3G-QM-tKw"/>
@@ -334,11 +333,11 @@
                                     <constraint firstItem="lxp-0s-KKP" firstAttribute="centerX" secondItem="IKh-zT-6ud" secondAttribute="centerX" id="wgy-eL-5PN"/>
                                 </constraints>
                             </view>
-                            <activityIndicatorView hidden="YES" opaque="NO" contentMode="scaleToFill" horizontalHuggingPriority="750" verticalHuggingPriority="750" hidesWhenStopped="YES" style="white" translatesAutoresizingMaskIntoConstraints="NO" id="5oc-Nw-GP5">
+                            <activityIndicatorView hidden="YES" opaque="NO" contentMode="scaleToFill" horizontalHuggingPriority="750" verticalHuggingPriority="750" hidesWhenStopped="YES" style="gray" translatesAutoresizingMaskIntoConstraints="NO" id="5oc-Nw-GP5">
                                 <rect key="frame" x="177.5" y="355.5" width="20" height="20"/>
                             </activityIndicatorView>
                         </subviews>
-                        <color key="backgroundColor" red="0.29803922770000002" green="0.29803922770000002" blue="0.29803922770000002" alpha="1" colorSpace="calibratedRGB"/>
+                        <color key="backgroundColor" red="1" green="1" blue="1" alpha="1" colorSpace="calibratedRGB"/>
                         <constraints>
                             <constraint firstItem="IKh-zT-6ud" firstAttribute="leading" secondItem="ki7-XE-hbk" secondAttribute="leading" id="Dc7-oW-EaL"/>
                             <constraint firstItem="IKh-zT-6ud" firstAttribute="top" secondItem="K6f-JB-r55" secondAttribute="bottom" id="Nmx-dY-rvh"/>

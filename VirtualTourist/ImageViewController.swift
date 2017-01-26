@@ -5,6 +5,9 @@
 //  Created by Luke Van In on 2017/01/22.
 //  Copyright © 2017 Luke Van In. All rights reserved.
 //
+//  Loads and displays a large version of an image. Supports zooming and panning the image. The image maintains 
+//  centering in the view when zoomed below the minimum scale.
+//
 
 import UIKit
 
@@ -96,6 +99,9 @@ class ImageViewController: UIViewController {
         task.resume()
     }
     
+    //
+    //
+    //
     private func calculateZoom() {
         guard let image = imageView.image else {
             return
@@ -112,8 +118,8 @@ class ImageViewController: UIViewController {
             scale = viewSize.height / imageSize.height
         }
         
-        let minimumScale = min(1.0, scale)
-        let maximumScale = max(1.0, scale)
+        let maximumScale = max(scale, 2.0)
+        let minimumScale = min(scale, maximumScale)
         
         scrollView.minimumZoomScale = minimumScale
         scrollView.maximumZoomScale = maximumScale

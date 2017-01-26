@@ -15,8 +15,8 @@ class ImageCell: UICollectionViewCell {
     
     override func awakeFromNib() {
         super.awakeFromNib()
-        imageView.layer.shouldRasterize = true
-        imageView.layer.rasterizationScale = UIScreen.main.scale
+        layer.cornerRadius = 4
+        layer.masksToBounds = true
     }
     
     override func prepareForReuse() {

@@ -6,7 +6,7 @@
 //  Copyright © 2017 Luke Van In. All rights reserved.
 //
 //  Shows information for a specific location. The location is shown as a static pin on a map. Images for the location
-//  are downloaded and shown.
+//  are downloaded and cached in core data.
 //
 
 import UIKit
@@ -20,38 +20,20 @@ class LocationViewController: UIViewController {
         case insert(IndexPath)
         case delete(IndexPath)
     }
-    
+
+    var coordinate: CLLocationCoordinate2D!
+    var model: LocationModel!
     var dataStack: CoreDataStack!
-    var location: Location!
     
-    fileprivate lazy var model: PhotosManager = { [unowned self] in
-        let manager = PhotosManager(
-            location: self.location.id!,
-            dataStack: self.dataStack)
-        return manager
-    }()
-    
+    //
+    //  Fetched results controller for providing Photo objects from core data. Notifies the view controller when changes 
+    //  are made to the photos for the current location (ie when photos are inserted or deleted).
+    //
     fileprivate lazy var fetchedResultsController: NSFetchedResultsController<Photo> = { [unowned self] in
-        let request: NSFetchRequest<Photo> = Photo.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(key: "ordering", ascending: true)]
-        if let id = self.location.id {
-            request.predicate = NSPredicate(format: "location.id == %@", id)
-        }
-        
-        let controller = NSFetchedResultsController(
-            fetchRequest: request,
-            managedObjectContext: self.dataStack.mainContext,
-            sectionNameKeyPath: nil,
-            cacheName: nil)
+        let controller = self.model.makePhotosFetchedResultsController()
         controller.delegate = self
         return controller
     }()
-    
-    override var isEditing: Bool {
-        didSet {
-            updateEditMode()
-        }
-    }
     
     fileprivate var photos = [Photo]() {
         didSet {
@@ -84,7 +66,7 @@ class LocationViewController: UIViewController {
     //  "New collection" button tapped. Reload random images from Flickr.
     //
     @IBAction func onReloadAction(_ sender: Any) {
-        refreshPhotos()
+        model.refreshPhotos()
     }
     
     // MARK: View controller life cycle
@@ -93,9 +75,9 @@ class LocationViewController: UIViewController {
         super.viewDidLoad()
         navigationItem.rightBarButtonItem = editButtonItem
         navigationController?.toolbar.barTintColor = UIColor(
-            red: 53.0 / 255.0,
-            green: 83.0 / 255.0,
-            blue: 147.0 / 255.0,
+            red: 128.0 / 255.0,
+            green: 0.0 / 255.0,
+            blue: 255.0 / 255.0,
             alpha: 1.0)
         configurePlaceholderView()
         configureMapView()
@@ -105,44 +87,53 @@ class LocationViewController: UIViewController {
     
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        view.layoutIfNeeded()
         setEditing(false, animated: false)
         loadPhotos()
-        refreshPhotosIfNeeded()
+        updateFetchingState(animated: false)
+        addNotificationObservers()
+        
+        view.layoutIfNeeded()
+        configureCellLayout()
+        configureCollectionViewInset()
     }
     
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        model.cancelFetching()
+        removeNotificationObservers()
     }
     
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         configureCellLayout()
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
         configureCollectionViewInset()
     }
     
-//    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
-//        coordinator.animate(alongsideTransition: { (_) in
-//            self.configureCollectionViewInset()
-//            self.configureCellLayout()
-//        }) { (_) in
-//        }
-//    }
-    
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
+        // Configure the image view controller when tapping on an image in the collection.
         if let viewController = segue.destination as? ImageViewController, let url = sender as? URL {
             viewController.imageURL = url
         }
     }
     
+    // MARK Editing
+    
+    //
+    //  Respond to edit mode change when edit/done button is tapped. When not editing, show the toolbar. When editing, 
+    //  hide the toolbar and show a helpful hint.
+    //
     override func setEditing(_ editing: Bool, animated: Bool) {
         super.setEditing(editing, animated: animated)
         
+        // Hide the toolbar in edit mode to show the hint message.
         if navigationController?.isToolbarHidden != editing {
             navigationController?.setToolbarHidden(editing, animated: animated)
         }
         
+        // Show the hint message in edit mode.
         if messageView.isHidden == isEditing {
             UIView.transition(
                 with: view,
@@ -154,10 +145,24 @@ class LocationViewController: UIViewController {
         }
     }
     
-    // MARK: Placeholder
+    //
+    //  Enable/disable the edit/done button according to the content. Enable the button if one or more photos are
+    //  available. Disable the button, and exit edit mode, if no photos are available.
+    //
+    fileprivate func updateEditMode() {
+        let canEdit = (photos.count > 0)
+        editButtonItem.isEnabled = canEdit
+        
+        if !canEdit && isEditing {
+            isEditing = false
+        }
+    }
+
+    // MARK: Placeholder message
     
     //
-    //
+    //  Show a placeholder view when images are loading, or when the api request completes and there are no images. The
+    //  placeholder appears below the map and above the "load more" button.
     //
     private func configurePlaceholderView() {
         collectionView.addSubview(placeholderView)
@@ -173,20 +178,49 @@ class LocationViewController: UIViewController {
     
     // MARK: State
     
+    //
+    //  Observe notifications from the model when the api request starts and finishes. Used to control the appearance
+    //  of the activity indicator.
+    //
+    private func addNotificationObservers() {
+        NotificationCenter.default.addObserver(self, selector: #selector(handleFetchingStateChangeNotification), name: .DidStartFetchingPhotosForLocation, object: model)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleFetchingStateChangeNotification), name: .DidFinishFetchingPhotosForLocation, object: model)
+    }
     
     //
+    //  Remove notification observers on the model.
     //
+    private func removeNotificationObservers() {
+        NotificationCenter.default.removeObserver(self, name: .DidStartFetchingPhotosForLocation, object: model)
+        NotificationCenter.default.removeObserver(self, name: .DidFinishFetchingPhotosForLocation, object: model)
+    }
+    
     //
-    fileprivate func setFetching(fetching: Bool, animated: Bool) {
-        guard isFetching != fetching else {
+    //  Called when the model starts, or finishes, fetching images from the api. Update the state of the activity
+    //  indicator.
+    //
+    @objc func handleFetchingStateChangeNotification(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateFetchingState(animated: true)
+        }
+    }
+    
+    //
+    //  Update the state of the activity indicator to match the state of the model. Only updates the view if the view
+    //  state is different to the model state.
+    //
+    private func updateFetchingState(animated: Bool) {
+        guard isFetching != self.model.isFetchingPhotos else {
             return
         }
-        isFetching = fetching
+        isFetching = self.model.isFetchingPhotos
         applyCurrentState(animated: animated)
     }
     
     //
-    //
+    //  Show or hide the activity indicator and/or empty content placeholder message, depending on the state and 
+    //  contents of the model. The activity indicator while an api request is underway. The placeholder is shown if no
+    //  photos are present after the api request completes. 
     //
     fileprivate func applyCurrentState(animated: Bool) {
     
@@ -213,6 +247,7 @@ class LocationViewController: UIViewController {
             configureView()
         }
         
+        // Show / hide the activity indicator.
         if showActivity {
             photosActivityIndicator.startAnimating()
         }
@@ -220,20 +255,13 @@ class LocationViewController: UIViewController {
             photosActivityIndicator.stopAnimating()
         }
     }
-    
-    fileprivate func updateEditMode() {
-        let canEdit = (photos.count > 0)
-        editButtonItem.isEnabled = canEdit
-        
-        if !canEdit && isEditing {
-            isEditing = false
-        }
-    }
 
     // MARK: Map
 
     //
-    //
+    //  Setup a view to display a map above the list of images. The view is constrained so that it resizes according to
+    //  the available space above the collection view, shrinks when the collection is scrolled up, and stretches when 
+    //  the collection is scrolled down passed its maximum limits.
     //
     private func configureMapView() {
         collectionView.addSubview(mapView)
@@ -248,7 +276,8 @@ class LocationViewController: UIViewController {
     }
     
     //
-    //
+    //  Calculate the amount of space above the collection view for the map view. Some space is left below the map so 
+    //  that at least one line of images is visible, such as in landscape mode on iPhone.
     //
     private func configureCollectionViewInset() {
         let viewSize = view.bounds.size
@@ -258,7 +287,8 @@ class LocationViewController: UIViewController {
     }
     
     //
-    //
+    //  Calculate the size of the cells for the current view size. Try to match an ideal cell size while minimizing the
+    //  wasted space.
     //
     private func configureCellLayout() {
         guard let layout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout else {
@@ -276,48 +306,41 @@ class LocationViewController: UIViewController {
     }
 
     //
-    //
+    //  Display an image of the map for the current location.
     //
     private func configureMap() {
+        
         let pinView = MKPinAnnotationView(annotation: nil, reuseIdentifier: nil)
         pinImageView.image = pinView.image
+        pinImageView.isHidden = true
+
+        mapActivityIndicator.startAnimating()
         
-        if let data = location.mapImage, let image = UIImage(data: data as Data, scale: UIScreen.main.scale) {
-            mapImageView.image = image
-        }
-        else {
-            mapActivityIndicator.startAnimating()
-            pinImageView.isHidden = true
-            loadMapImage() { [weak self] image in
-                DispatchQueue.main.async {
-                    guard let `self` = self else {
-                        return
-                    }
-                    self.mapActivityIndicator.stopAnimating()
-                    UIView.transition(
-                        with: self.view,
-                        duration: 0.25,
-                        options: [.beginFromCurrentState, .transitionCrossDissolve],
-                        animations: {
-                            self.mapImageView.image = image
-                            self.pinImageView.isHidden = false
-                    })
-                    
-                    if let image = image {
-                        self.saveMapImage(image: image)
-                    }
+        loadMapImage() { [weak self] image in
+            DispatchQueue.main.async {
+                guard let `self` = self else {
+                    return
                 }
+                self.mapActivityIndicator.stopAnimating()
+                UIView.transition(
+                    with: self.view,
+                    duration: 0.25,
+                    options: [.beginFromCurrentState, .transitionCrossDissolve],
+                    animations: {
+                        self.mapImageView.image = image
+                        self.pinImageView.isHidden = false
+                })
             }
         }
     }
     
     //
-    //
+    //  Generates a map image for the current location..
     //
     private func loadMapImage(completion: @escaping (UIImage?) -> Void) {
-
+        
         let region = MKCoordinateRegion(
-            center: location.coordinate,
+            center: coordinate,
             span: MKCoordinateSpan(
                 latitudeDelta: 1.0,
                 longitudeDelta: 1.0
@@ -337,31 +360,13 @@ class LocationViewController: UIViewController {
             completion(snapshot?.image)
         }
     }
-    
-    //
-    //
-    //
-    private func saveMapImage(image: UIImage) {
-        let objectId = location.objectID
-        dataStack.performBackgroundChanges { (context) in
-            guard let data = UIImagePNGRepresentation(image) else {
-                return
-            }
-            do {
-                let location = try context.existingObject(with: objectId) as? Location
-                location?.mapImage = data as NSData
-                try context.save()
-            }
-            catch {
-                print("Cannot save map image: \(error)")
-            }
-        }
-    }
+
     
     // MARK: Photos
     
     //
-    //
+    //  Sets up loading photos from core data using a fetched results controller. After the initial load, the data is
+    //  updated incrementally by callbacks to the fetched results controller delegate.
     //
     private func loadPhotos() {
         do {
@@ -375,46 +380,24 @@ class LocationViewController: UIViewController {
             print("Cannot load photos: \(error)")
         }
     }
-    
-    //
-    //
-    //
-    private func refreshPhotosIfNeeded() {
-        if photos.count == 0 {
-            refreshPhotos()
-        }
-        else {
-            model.downloadImages(completion: nil)
-        }
-    }
-    
-    //
-    //
-    //
-    private func refreshPhotos() {
-        model.cancelFetching()
-        setFetching(fetching: true, animated: true)
-        model.deletePhotos() { [weak self] _ in
-            guard let location = self?.location else {
-                return
-            }
-            self?.model.fetchPhotos(coordinate: location.coordinate, radius: 20, numberOfItems: 30) {
-                self?.setFetching(fetching: false, animated: true)
-            }
-        }
-    }
-    
 }
 
 //
-//
+//  NSFetchedResultsControllerDelegate
 //
 extension LocationViewController: NSFetchedResultsControllerDelegate {
     
+    //
+    //  Fetched results controller is about to make some changes. Initializes a change list to collect changes.
+    //
     func controllerWillChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
         changes = []
     }
     
+    //
+    //  Handle an incremental change from the fetched results controller. The changes are coalesced into an list and 
+    //  applied in a batch at the end of the changes.
+    //
     func controller(_ controller: NSFetchedResultsController<NSFetchRequestResult>, didChange anObject: Any, at indexPath: IndexPath?, for type: NSFetchedResultsChangeType, newIndexPath: IndexPath?) {
         
         switch (type, indexPath, newIndexPath) {
@@ -436,6 +419,10 @@ extension LocationViewController: NSFetchedResultsControllerDelegate {
         }
     }
     
+    //
+    //  Fetched results controller has finished making changes. Any collected changes are applied now in a batch 
+    //  operation on the collection view.
+    //
     func controllerDidChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
         guard let changes = changes, changes.count > 0 else {
             return
@@ -471,7 +458,11 @@ extension LocationViewController: UICollectionViewDataSource, UICollectionViewDe
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         return photos.count
     }
-    
+
+    //
+    //  Load and display the cached photo from the data stored in core data. The cell is reloaded when the data is saved 
+    //  into core data. If no image data is available when the cell appears, an activity indicator is shown instead.
+    //
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "ImageCell", for: indexPath)
         if let cell = cell as? ImageCell {
@@ -487,11 +478,17 @@ extension LocationViewController: UICollectionViewDataSource, UICollectionViewDe
         return cell
     }
     
+    //
+    //  Handle tap on photo. Shows a large version of the image which is tapped. If in editing mode, then the image is 
+    //  deleted.
+    //
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         let photo = photos[indexPath.item]
         if isEditing {
-            model.cancelFetching()
-            model.deletePhoto(id: photo.objectID, completion: nil)
+            if let url = photo.url {
+                model.cancelDownloadingPhoto(url: url)
+                model.deletePhoto(url: url, completion: nil)
+            }
         }
         else {
             if let url = photo.largeURL, let imageURL = URL(string: url) {

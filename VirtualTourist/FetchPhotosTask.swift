@@ -28,7 +28,6 @@ class FetchPhotosTask {
         self.request = request
         self.dataStack = dataStack
         self.completion = completion
-        self.execute()
     }
     
     //
@@ -43,7 +42,7 @@ class FetchPhotosTask {
     //
     //
     //
-    private func execute() {
+    func execute() {
         fetchPhotos() { [weak self] response in
             guard let `self` = self, !self.isCancelled else {
                 return
@@ -52,6 +51,9 @@ class FetchPhotosTask {
         }
     }
     
+    //
+    //
+    //
     private func fetchPhotos(completion: @escaping Completion) {
         let service = FlickrService()
         task = service.fetchPhotos(request: request) { [weak self] response, error in
@@ -67,6 +69,9 @@ class FetchPhotosTask {
         task?.resume()
     }
 
+    //
+    //
+    //
     private func insertPhotos(photos: [FlickrPhoto], completion: @escaping () -> Void) {
         dataStack.performBackgroundChanges() { [weak self, locationId] context in
             guard let `self` = self else {

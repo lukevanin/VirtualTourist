@@ -30,7 +30,7 @@ extension NSManagedObjectContext {
     //
     //  Retrieve all photos for a specific location
     //
-    func photos(forLocation id: String) throws -> [Photo] {
+    func photos(location id: String) throws -> [Photo] {
         let request: NSFetchRequest<Photo> = Photo.fetchRequest()
         request.predicate = NSPredicate(format: "location.id == %@", id)
         return try fetch(request)
@@ -39,9 +39,12 @@ extension NSManagedObjectContext {
     //
     //
     //
-    func photos(withURL url: String) throws -> [Photo] {
+    func photos(location id:String, url: String) throws -> [Photo] {
         let request: NSFetchRequest<Photo> = Photo.fetchRequest()
-        request.predicate = NSPredicate(format: "url == %@", url)
+        request.predicate = NSCompoundPredicate.init(andPredicateWithSubpredicates: [
+            NSPredicate(format: "location.id == %@", id),
+            NSPredicate(format: "url == %@", url)
+            ])
         return try fetch(request)
     }
 }
