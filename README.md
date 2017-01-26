@@ -28,7 +28,7 @@ Image data is also managed by Core Data using the external file attribute for th
 
 ### Photos
 
-Photos are loaded in the background when the pin is added to the map. When the app launches it resumes downloading any images which were not
+Photos are loaded in the background when the pin is added to the map. When the app launches any missing images are downloaded.
 
 ### Map
 
