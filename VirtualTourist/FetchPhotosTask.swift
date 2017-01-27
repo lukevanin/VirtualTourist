@@ -73,11 +73,7 @@ class FetchPhotosTask {
     //
     //
     private func insertPhotos(photos: [FlickrPhoto], completion: @escaping () -> Void) {
-        dataStack.performBackgroundChanges() { [weak self, locationId] context in
-            guard let `self` = self else {
-                return
-            }
-            
+        dataStack.performBackgroundChanges() { [dataStack, locationId] context in
             do {
                 let locations = try context.locations(withId: locationId)
                 
@@ -100,13 +96,17 @@ class FetchPhotosTask {
                 // Save changed
                 if !self.isCancelled {
                     try context.save()
+                    context.processPendingChanges()
                 }
             }
             catch {
                 print("Cannot insert photos: \(error)")
             }
-
-            completion()
+            
+            DispatchQueue.main.async {
+                dataStack.saveNow()
+                completion()
+            }
         }
     }
 }

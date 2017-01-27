@@ -121,6 +121,11 @@ class PhotosDownloader {
                 // Task must exist and not be cancelled.
                 if let task = task, task.state != .canceling, task.state != .suspended {
                     try context.save()
+                    context.processPendingChanges()
+                    
+                    DispatchQueue.main.async {
+                        self?.dataStack.saveNow()
+                    }
                 }
             }
             catch {

@@ -17,7 +17,15 @@ private let entityName = "Location"
 //
 //
 class LocationAnnotation: MKPointAnnotation {
-    var locationId: String?
+    var locationId: String
+    
+    convenience override init() {
+        self.init(locationId: UUID().uuidString)
+    }
+    
+    required init(locationId: String) {
+        self.locationId = locationId
+    }
 }
 
 //
@@ -41,12 +49,12 @@ extension Location {
     //
     //  Initialize the location with a core location coordinate, and insert it into a context.
     //
-    convenience init(coordinate: CLLocationCoordinate2D, context: NSManagedObjectContext) {
+    convenience init(id: String, coordinate: CLLocationCoordinate2D, context: NSManagedObjectContext) {
         guard let entity = NSEntityDescription.entity(forEntityName: entityName, in: context) else {
             fatalError("Cannot initialize entity \(entityName)")
         }
         self.init(entity: entity, insertInto: context)
-        self.id = UUID().uuidString
+        self.id = id
         self.coordinate = coordinate
     }
     
@@ -54,8 +62,7 @@ extension Location {
     //  Convenience function for creating map kit annotations from a location instance.
     //
     func toAnnotation() -> LocationAnnotation {
-        let annotation = LocationAnnotation()
-        annotation.locationId = id
+        let annotation = LocationAnnotation(locationId: id!)
         annotation.coordinate = coordinate
         return annotation
     }
@@ -81,5 +88,62 @@ extension NSManagedObjectContext {
         let request: NSFetchRequest<Location> = Location.fetchRequest()
         request.predicate = NSPredicate(format: "id == %@", id)
         return try fetch(request)
+    }
+}
+
+//
+// Extensions on CoreDataStack for managing Locations.
+//
+extension CoreDataStack {
+    
+    typealias InsertCompletion = (Location?) -> Void
+    
+    //
+    //  Instantiate and persist a new location model from a map annotation.
+    //
+    func addLocation(annotation: LocationAnnotation, completion: @escaping InsertCompletion) {
+        performBackgroundChanges { [weak self] (context) in
+            
+            guard let `self` = self else {
+                return
+            }
+            
+            do {
+                
+                // Create and insert the location
+                let id = annotation.locationId
+                let _ = Location(
+                    id: id,
+                    coordinate: annotation.coordinate,
+                    context: context)
+                try context.save()
+                context.processPendingChanges()
+                
+                // Save the context to the persistent store.
+                DispatchQueue.main.async {
+                    
+                    self.saveNow() {
+
+                        // Load the location on the main queue.
+                        DispatchQueue.main.async {
+                            do {
+                                let locations = try self.mainContext.locations(withId: id)
+                                let location = locations.first
+                                completion(location)
+                            }
+                            catch {
+                                print("Cannot fetch new location: \(error)")
+                                completion(nil)
+                            }
+                        }
+                    }
+                }
+                
+            }
+            catch {
+                print("Cannot add location: \(error)")
+                completion(nil)
+            }
+        }
     }
 }

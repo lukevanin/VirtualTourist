@@ -20,6 +20,7 @@ class LocationModel {
     
     typealias DeleteCompletion = (Bool) -> Void
     typealias FetchCompletion = () -> Void
+    typealias InsertCompletion = (LocationModel?) -> Void
     
     var isFetchingPhotos: Bool {
         return (photosFetcher != nil)
@@ -34,6 +35,7 @@ class LocationModel {
     fileprivate let numberOfPhotos: Int
     fileprivate let dataStack: CoreDataStack
     
+    
     init(location: String, radius: Int, numberOfPhotos: Int, dataStack: CoreDataStack) {
         self.locationId = location
         self.radius = radius
@@ -42,20 +44,24 @@ class LocationModel {
         self.downloader = PhotosDownloader(location: location, dataStack: dataStack)
     }
     
-    // MARK: Location 
+    // MARK: Location
     
     //
     //
     //
     func deleteLocation(completion: DeleteCompletion?) {
-        dataStack.performBackgroundChanges() { [locationId] context in
+        dataStack.performBackgroundChanges() { [dataStack, locationId] context in
             do {
                 let locations = try context.locations(withId: locationId)
                 for location in locations {
                     context.delete(location)
                 }
                 try context.save()
-                completion?(true)
+                context.processPendingChanges()
+                DispatchQueue.main.async {
+                    dataStack.saveNow()
+                    completion?(true)
+                }
             }
             catch {
                 print("Cannot delete location: \(error)")
@@ -78,14 +84,18 @@ class LocationModel {
     //
     func deletePhoto(url: String, completion: DeleteCompletion?) {
         assert(Thread.isMainThread)
-        dataStack.performBackgroundChanges() { [locationId] context in
+        dataStack.performBackgroundChanges() { [dataStack, locationId] context in
             do {
                 let photos = try context.photos(location: locationId, url: url)
                 for photo in photos {
                     context.delete(photo)
                 }
                 try context.save()
-                completion?(true)
+                context.processPendingChanges()
+                DispatchQueue.main.async {
+                    dataStack.saveNow()
+                    completion?(true)
+                }
             }
             catch {
                 print("Cannot delete photo: \(error)")
@@ -135,14 +145,18 @@ class LocationModel {
     //
     //
     func deletePhotos(completion: DeleteCompletion?) {
-        dataStack.performBackgroundChanges() { [locationId] context in
+        dataStack.performBackgroundChanges() { [dataStack, locationId] context in
             do {
                 let photos = try context.photos(location: locationId)
                 for photo in photos {
                     context.delete(photo)
                 }
                 try context.save()
-                completion?(true)
+                context.processPendingChanges()
+                DispatchQueue.main.async {
+                    dataStack.saveNow()
+                    completion?(true)
+                }
             }
             catch {
                 print("Cannot delete photos: \(error)")

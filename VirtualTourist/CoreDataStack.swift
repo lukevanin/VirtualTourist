@@ -114,31 +114,33 @@ extension CoreDataStack {
     //
     //  Save the background context and persist any pending changes to fixed storage.
     //
-    func saveNow() {
+    func saveNow(completion: (() -> Void)? = nil) {
         assert(Thread.isMainThread)
-        if self.mainContext.hasChanges {
+        if mainContext.hasChanges {
             do {
-                try self.mainContext.save()
+                try mainContext.save()
+                mainContext.processPendingChanges()
             }
             catch {
                 print("Cannot save changes from background context")
             }
         }
 
-        backgroundContext.perform() {
-            guard self.backgroundContext.hasChanges else {
-                // No pending changes.
-                return
-            }
+        let context = self.backgroundContext
+        context.perform() {
+            if context.hasChanges {
+                print("Saving background context")
 
-            print("Saving background context")
-
-            do {
-                try self.backgroundContext.save()
+                do {
+                    try context.save()
+                    context.processPendingChanges()
+                }
+                catch {
+                    print("Cannot save background context. Reason: \(error)")
+                }
             }
-            catch {
-                print("Cannot save background context. Reason: \(error)")
-            }
+            
+            completion?()
         }
     }
 }

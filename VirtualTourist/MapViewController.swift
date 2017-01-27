@@ -24,7 +24,7 @@ class MapViewController: UIViewController {
         return instance
     }()
     
-    fileprivate var isTouching = false
+    fileprivate var currentAnnotation: LocationAnnotation?
     fileprivate var models = [String : LocationModel]()
     
     // MARK: Outlets.
@@ -41,19 +41,37 @@ class MapViewController: UIViewController {
     //
     @IBAction func onMapLongPressGesture(_ gesture: UIGestureRecognizer) {
         
-        guard gesture.state == .began else {
-            isTouching = false
-            return
-        }
-        
-        isTouching = true
-        
         // Convert the gesture location to map coordinates.
         let point = gesture.location(in: view)
         let coordinate = mapView.convert(point, toCoordinateFrom: view)
+        
+        switch gesture.state {
+            
+        case .began:
+            // Create and add the annotation to the map.
+            currentAnnotation = LocationAnnotation()
+            currentAnnotation!.coordinate = coordinate
+            mapView.addAnnotation(currentAnnotation!)
+            updateEditMode()
+            
+        case .changed:
+            currentAnnotation?.coordinate = coordinate
+            
+        case .ended:
+            if let annotation = currentAnnotation {
+                annotation.coordinate = coordinate
+                saveLocation(annotation: annotation)
+            }
+            currentAnnotation = nil
+            updateEditMode()
 
-        // Add the location to core data.
-        addLocation(coordinate: coordinate)
+        default:
+            if let annotation = currentAnnotation {
+                mapView.removeAnnotation(annotation)
+            }
+            currentAnnotation = nil
+            updateEditMode()
+        }
     }
     
     // MARK: View controller life cycle.
@@ -66,7 +84,6 @@ class MapViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        isTouching = false
         navigationController?.setToolbarHidden(true, animated: false)
         setEditing(false, animated: false)
         updateEditMode()
@@ -80,7 +97,8 @@ class MapViewController: UIViewController {
             viewController.dataStack = dataStack
             viewController.coordinate = annotation.coordinate
             
-            if let id = annotation.locationId, let model = models[id] {
+            let id = annotation.locationId
+            if let model = models[id] {
                 viewController.model = model
             }
         }
@@ -108,11 +126,14 @@ class MapViewController: UIViewController {
     
     //
     //  Enable and disable the edit button. The edit button is enabled when there is one or more pins on the map, and 
-    //  disabled when the map has no pins.
+    //  disabled when the map has no pins. Editing is disabled while placing a pin.
     //
     fileprivate func updateEditMode() {
-        let canEdit = (mapView.annotations.count > 0)
-        editButtonItem.isEnabled = canEdit
+        let canEdit = (currentAnnotation == nil) && (mapView.annotations.count > 0)
+        
+        if editButtonItem.isEnabled != canEdit {
+            editButtonItem.isEnabled = canEdit
+        }
         
         if !canEdit && isEditing {
             isEditing = false
@@ -161,36 +182,17 @@ class MapViewController: UIViewController {
     //  available when it needs to be removed or modified. Once inserted, the object must be loaded into the main 
     //  context so that it can be be used on the map.
     //
-    private func addLocation(coordinate: CLLocationCoordinate2D) {
-        dataStack.performBackgroundChanges { (context) in
-            do {
-                
-                // Create and insert the location
-                let location = Location(coordinate: coordinate, context: context)
-                try context.save()
-                let objectID = location.objectID
-                
-                DispatchQueue.main.async {
-                    
-                    // Load the location on the main queue.
-                    guard let object = try? self.dataStack.mainContext.existingObject(with: objectID), let location = object as? Location, let id = location.id  else {
-                        return
-                    }
-                    
-                    // Add the model.
-                    let model = self.makeModelForLocation(id: id)
-                    self.models[id] = model
-                    
-                    // Create and add the annotation to the map.
-                    let annotation = location.toAnnotation()
-                    self.mapView.addAnnotation(annotation)
-                    
-                    // Exit edit mode if no more pins are on the map.
-                    self.updateEditMode()
+    private func saveLocation(annotation: LocationAnnotation) {
+        dataStack.addLocation(annotation: annotation) { [weak self] (location) in
+            DispatchQueue.main.async {
+                guard
+                    let location = location,
+                    let id = location.id,
+                    let model = self?.makeModelForLocation(id: id)
+                else {
+                    return
                 }
-            }
-            catch {
-                print("Cannot add location: \(error)")
+                self?.models[id] = model
             }
         }
     }
@@ -226,7 +228,7 @@ extension MapViewController: MKMapViewDelegate {
             pinView = MKPinAnnotationView(annotation: annotation, reuseIdentifier: reuseIdentifier)
         }
 
-        pinView?.animatesDrop = isTouching
+        pinView?.animatesDrop = (currentAnnotation != nil)
         return pinView
     }
     
@@ -241,12 +243,11 @@ extension MapViewController: MKMapViewDelegate {
         mapView.deselectAnnotation(annotation, animated: true)
         if isEditing {
             // Editing mode. Tap on pin to remove.
-            if let id = annotation.locationId {
-                mapView.removeAnnotation(annotation)
-                deleteLocation(id: id) { _ in
-                    DispatchQueue.main.async {
-                        self.updateEditMode()
-                    }
+            mapView.removeAnnotation(annotation)
+            let id = annotation.locationId
+            deleteLocation(id: id) { _ in
+                DispatchQueue.main.async {
+                    self.updateEditMode()
                 }
             }
         }
